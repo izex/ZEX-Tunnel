@@ -2,11 +2,8 @@
 set -euo pipefail
 
 # =========================================================
-#                ZEX Tunnel V3 — Installer
+#                ZEX Tunnel V3 — Installer (beta)
 # =========================================================
-# Requirements (enforced below):
-# - Ubuntu 20.04.x or 22.04.x ONLY
-# - Must be run as root (sudo)
 
 VERSION="V3.250908"
 BASE_DIR="/root/ZEX-Tunnel"
@@ -18,13 +15,12 @@ INSTALL_SCRIPT="$BASE_DIR/zex-tunnel-install.sh"   # Save this script at this pa
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_FILE="$SCRIPT_DIR/install-$(date +'%Y%m%d-%H%M%S').log"
 
-# If script directory is not writable, fall back to /tmp to avoid losing logs
+# If script directory is not writable, fall back to /tmp
 if ! ( : >"$LOG_FILE" ) 2>/dev/null; then
   LOG_FILE="/tmp/zex-tunnel-install-$(date +'%Y%m%d-%H%M%S').log"
   : >"$LOG_FILE"
 fi
 
-# Send ALL stdout/stderr to both terminal + log
 exec > >(tee -a "$LOG_FILE") 2>&1
 
 echo "===================================================="
@@ -40,7 +36,6 @@ trap 'rc=$?;
   echo "Log file: $LOG_FILE";
   exit $rc' ERR
 
-# Optional: keep a command trace (super useful for debug)
 # Enable by: TRACE=1 bash script.sh
 if [[ "${TRACE:-0}" == "1" ]]; then
   set -x
@@ -51,12 +46,10 @@ fi
 # Services
 SERVICE_TUN="zextunnel"
 SERVICE_WEB="zexweb"
-SERVICE_API="zexapi"
 
 # Binaries (expected paths)
 BIN_TUN="$BASE_DIR/Waterwall"
 BIN_WEB="$BASE_DIR/web.py"
-BIN_API="$BASE_DIR/api"
 
 # Files in MAIN (mutable)
 CORE_MAIN="$BASE_DIR/core.json"
@@ -91,7 +84,7 @@ else
   UBUNTU_VERSION=""
 fi
 case "$UBUNTU_VERSION" in
-  20.04|22.04|20.*|22.*) : ;;   # accept 20.x and 22.x only
+  20.04|22.04|20.*|22.*) : ;;
   *) echo "Unsupported Ubuntu $UBUNTU_VERSION (supported: 20.04–20.x, 22.04–22.x)"; exit 1;;
 esac
 
@@ -123,7 +116,6 @@ validate_protocol() {
   return 0
 }
 validate_ports() {
-  # Input: space-separated ports; MAX 10
   local ports_str="$1"
   [[ -n "$ports_str" ]] || return 1
   local -A seen=()
@@ -158,15 +150,13 @@ get_local_ipv4(){
   ip -4 addr show scope global up 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -n1
 }
 get_local_ipv6(){
-  # exclude link-local fe80:: ; prefer global if present
   ip -6 addr show scope global up 2>/dev/null | awk '/inet6/{print $2}' | cut -d/ -f1 | grep -v '^fe80:' | head -n1
 }
 
 # -------------------- JSON manipulations (via jq) --------------------
-# Append inputN/outputN pairs for extra ports to MAIN IR json.
 add_extra_ports_to_ir_json() {
   local json_file="$CONF_IR_MAIN"
-  local ports_str="$1"    # space-separated ports (including first); we will skip the first
+  local ports_str="$1"
   local first=true
   local extras=() p
   for p in $ports_str; do
@@ -178,7 +168,6 @@ add_extra_ports_to_ir_json() {
   local ports_json
   ports_json=$(printf '%s\n' "${extras[@]}" | jq -R . | jq -s .)
 
-  # Fixed jq program (no invalid ';' usage)
   local jq_prog='
     def mk_input(n; port):
       {name: ("input"+(n|tostring)), type:"TcpListener",
@@ -188,7 +177,6 @@ add_extra_ports_to_ir_json() {
       {name: ("output"+(n|tostring)), type:"TcpConnector",
        settings:{nodelay:true, address:"10.10.0.2", port:(port|tonumber)}};
 
-    # count existing input nodes to continue numbering (assumes output count matches)
     ([ .nodes[]? | select(.name|startswith("input")) ] | length) as $base
     | reduce ( $ports | to_entries[] ) as $e
         ( .;
@@ -258,27 +246,8 @@ PrivateTmp=true
 WantedBy=multi-user.target
 EOF
 
-  cat >/etc/systemd/system/${SERVICE_API}.service <<EOF
-[Unit]
-Description=ZEX Tunnel API
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-WorkingDirectory=$BASE_DIR
-ExecStart=$BIN_API
-Restart=always
-RestartSec=3
-NoNewPrivileges=true
-PrivateTmp=true
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
   systemctl daemon-reload
-  systemctl enable ${SERVICE_TUN} ${SERVICE_WEB} ${SERVICE_API} >/dev/null 2>&1 || true
+  systemctl enable ${SERVICE_TUN} ${SERVICE_WEB} >/dev/null 2>&1 || true
 }
 
 # -------------------- Panel (zt) --------------------
@@ -293,7 +262,6 @@ PANEL_NAME="ZEX Tunnel V3 — Panel"
 
 SERVICE_TUN="zextunnel"
 SERVICE_WEB="zexweb"
-# zexapi is intentionally hidden from panel
 
 CONFIG_FILE="$BASE_DIR/config.zex"    # IRAN_IP, KHAREJ_IP, PROTOCOL, PORTS
 WEB_CONFIG="$BASE_DIR/web.zex"        # port, -, pass, -
@@ -435,10 +403,8 @@ main_loop() {
          read -r -p "Step 2 — Type 'UNINSTALL' to proceed: " tok
          [[ "$tok" == "UNINSTALL" ]] || { echo "Token mismatch. Cancelled."; read -r -p "Enter..." _; continue; }
 
-         systemctl disable --now zextunnel zexweb zexapi || true
-         systemctl disable --now ztw ztwl || true
-         rm -f /etc/systemd/system/zextunnel.service /etc/systemd/system/zexweb.service /etc/systemd/system/zexapi.service \
-               /etc/systemd/system/ztw.service /etc/systemd/system/ztwl.service || true
+         systemctl disable --now zextunnel zexweb || true
+         rm -f /etc/systemd/system/zextunnel.service /etc/systemd/system/zexweb.service || true
          systemctl daemon-reload
          rm -rf "$BASE_DIR"
          rm -f /usr/local/bin/zt
@@ -463,7 +429,6 @@ EOS
 run_wizard() {
   BANNER
 
-  # Show local IPs before location prompt
   local IPV4 IPV6
   IPV4="$(get_local_ipv4)"; [[ -z "${IPV4:-}" ]] && IPV4="N/A"
   IPV6="$(get_local_ipv6)"; [[ -z "${IPV6:-}" ]] && IPV6="N/A"
@@ -526,12 +491,9 @@ run_wizard() {
   read -r -p "Proceed? (Y/n): " go
   [[ -z "${go:-}" || "${go,,}" == "y" ]] || { echo "Cancelled."; exit 1; }
 
-  # Recreate config.zex every time (install or reconfigure)
   printf '%s\n%s\n%s\n%s\n' "$IRAN_IP" "$KHAREJ_IP" "$PROTOCOL" "${PORTS:-}" > "$CONF_ZEX_MAIN"
 
-  # Copy from config/ into main, then modify MAIN copies only
   if [[ "$LOCATION_CHOICE" == "1" ]]; then
-    # Iran
     cp -f "$CORE_SRC" "$CORE_MAIN"
     sed -i -e 's#"__CONFIG_FILE__"#"config_ir.json"#g' "$CORE_MAIN"
     cp -f "$CONF_IR_SRC" "$CONF_IR_MAIN"
@@ -539,7 +501,6 @@ run_wizard() {
     apply_placeholders_ir "$IRAN_IP" "$KHAREJ_IP" "$PROTOCOL" "$first_port"
     add_extra_ports_to_ir_json "$PORTS"
   else
-    # Kharej
     cp -f "$CORE_SRC" "$CORE_MAIN"
     sed -i -e 's#"__CONFIG_FILE__"#"config_kharej.json"#g' "$CORE_MAIN"
     cp -f "$CONF_KH_SRC" "$CONF_KH_MAIN"
@@ -578,21 +539,17 @@ main() {
   write_units
   write_panel
 
-  # Warn if expected binaries are missing (do not abort)
-  for f in "$BIN_TUN" "$BIN_WEB" "$BIN_API"; do
-    [[ -x "$f" || -f "$f" ]] || echo "Warning: Expected file not found yet: $f"
+  # Warn if expected files are missing (do not abort)
+  for f in "$BIN_TUN" "$BIN_WEB"; do
+    [[ -f "$f" ]] || echo "Warning: Expected file not found yet: $f"
   done
 
-  # First-time setup
   run_wizard
 
-  # Permissions for binaries (best-effort)
-  chmod +x "$BIN_TUN" "$BIN_API" 2>/dev/null || true
+  chmod +x "$BIN_TUN" 2>/dev/null || true
 
-  # Start / enable services
   systemctl restart ${SERVICE_TUN} ${SERVICE_WEB} || true
-  systemctl enable  ${SERVICE_TUN} ${SERVICE_WEB} ${SERVICE_API} >/dev/null 2>&1 || true
-  systemctl start   ${SERVICE_API} || true
+  systemctl enable  ${SERVICE_TUN} ${SERVICE_WEB} >/dev/null 2>&1 || true
 
   echo
   echo "Installation complete. Run 'zt' to open the panel."
