@@ -14,6 +14,40 @@ CFG_DIR="$BASE_DIR/config"              # Source config directory (READ-ONLY; ne
 PANEL_PATH="/usr/local/bin/zt"
 INSTALL_SCRIPT="$BASE_DIR/zex-tunnel-install.sh"   # Save this script at this path for panel option 10
 
+# -------------------- Logging (alongside script) --------------------
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOG_FILE="$SCRIPT_DIR/install-$(date +'%Y%m%d-%H%M%S').log"
+
+# If script directory is not writable, fall back to /tmp to avoid losing logs
+if ! ( : >"$LOG_FILE" ) 2>/dev/null; then
+  LOG_FILE="/tmp/zex-tunnel-install-$(date +'%Y%m%d-%H%M%S').log"
+  : >"$LOG_FILE"
+fi
+
+# Send ALL stdout/stderr to both terminal + log
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+echo "===================================================="
+echo "ZEX Tunnel installer started at: $(date -Is)"
+echo "Version: $VERSION"
+echo "Script: ${BASH_SOURCE[0]}"
+echo "Log file: $LOG_FILE"
+echo "User: $(id -u)  Host: $(hostname)"
+echo "===================================================="
+
+trap 'rc=$?;
+  echo "!! ERROR: exit_code=$rc at line=$LINENO command: $BASH_COMMAND";
+  echo "Log file: $LOG_FILE";
+  exit $rc' ERR
+
+# Optional: keep a command trace (super useful for debug)
+# Enable by: TRACE=1 bash script.sh
+if [[ "${TRACE:-0}" == "1" ]]; then
+  set -x
+  export PS4="+ [${BASH_SOURCE##*/}:${LINENO}] "
+fi
+# -------------------- End Logging --------------------
+
 # Services
 SERVICE_TUN="zextunnel"
 SERVICE_WEB="zexweb"
@@ -562,6 +596,7 @@ main() {
 
   echo
   echo "Installation complete. Run 'zt' to open the panel."
+  echo "Log saved at: $LOG_FILE"
 }
 
 main "$@"
